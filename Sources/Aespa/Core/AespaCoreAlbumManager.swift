@@ -20,6 +20,7 @@ class AespaCoreAlbumManager: NSObject {
     private var album: PHAssetCollection?
     private var latestVideoFetchResult: PHFetchResult<PHAsset>?
     private var latestPhotoFetchResult: PHFetchResult<PHAsset>?
+    private var isProcessingUserCapture: Bool = false
     
     convenience init(
         albumName: String,
@@ -92,11 +93,17 @@ class AespaCoreAlbumManager: NSObject {
 
 extension AespaCoreAlbumManager {
     func addToAlbum(filePath: URL) async throws {
+        isProcessingUserCapture = true
+        defer { isProcessingUserCapture = false }
+        
         let processor = VideoAssetAdditionProcessor(filePath: filePath)
         try await run(processor: processor)
     }
 
     func addToAlbum(imageData: Data) async throws {
+        isProcessingUserCapture = true
+        defer { isProcessingUserCapture = false }
+        
         let processor = PhotoAssetAdditionProcessor(imageData: imageData)
         try await run(processor: processor)
     }
@@ -138,13 +145,30 @@ extension AespaCoreAlbumManager: PHPhotoLibraryChangeObserver {
     }
     
     private func ensureLatestFetchResults(for album: PHAssetCollection) {
+        // Flag to indicate we're in initial loading
+        let isInitialLoad = latestVideoFetchResult == nil || latestPhotoFetchResult == nil
+        
         if latestVideoFetchResult == nil {
             latestVideoFetchResult = try? AssetLoader(limit: 0, assetType: .video).laodFetchResult(photoLibrary, album)
+            if isInitialLoad,
+               let fetchResult = latestVideoFetchResult,
+               fetchResult.count > 0 {
+                let indexSet = IndexSet(integersIn: 0..<fetchResult.count)
+                let assets = fetchResult.objects(at: indexSet)
+                videoAssetEventSubject.send(.added(Array(assets), source: .initialLoad))
+            }
             observePhotoLibraryChanges(album: album)
         }
         
         if latestPhotoFetchResult == nil {
             latestPhotoFetchResult = try? AssetLoader(limit: 0, assetType: .image).laodFetchResult(photoLibrary, album)
+            if isInitialLoad,
+               let fetchResult = latestPhotoFetchResult,
+               fetchResult.count > 0 {
+                let indexSet = IndexSet(integersIn: 0..<fetchResult.count)
+                let assets = fetchResult.objects(at: indexSet)
+                photoAssetEventSubject.send(.added(Array(assets), source: .initialLoad))
+            }
             observePhotoLibraryChanges(album: album)
         }
     }
@@ -177,11 +201,12 @@ extension AespaCoreAlbumManager: PHPhotoLibraryChangeObserver {
         let removedObjects = details.removedObjects
         
         if !addedObjects.isEmpty {
-            videoAssetEventSubject.send(.added(addedObjects))
+            let source: AssetEventSource = isProcessingUserCapture ? .userCapture : .externalChange
+            videoAssetEventSubject.send(.added(addedObjects, source: source))
         }
         
         if !removedObjects.isEmpty {
-            videoAssetEventSubject.send(.deleted(removedObjects))
+            videoAssetEventSubject.send(.deleted(removedObjects, source: .externalChange))
         }
     }
 
@@ -190,11 +215,12 @@ extension AespaCoreAlbumManager: PHPhotoLibraryChangeObserver {
         let removedObjects = details.removedObjects
         
         if !addedObjects.isEmpty {
-            photoAssetEventSubject.send(.added(addedObjects))
+            let source: AssetEventSource = isProcessingUserCapture ? .userCapture : .externalChange
+            photoAssetEventSubject.send(.added(addedObjects, source: source))
         }
         
         if !removedObjects.isEmpty {
-            photoAssetEventSubject.send(.deleted(removedObjects))
+            photoAssetEventSubject.send(.deleted(removedObjects, source: .externalChange))
         }
     }
 }
