@@ -18,9 +18,6 @@ let package = Package(
             dependencies: []),
         .testTarget(
             name: "AespaTests",
-            dependencies: ["Aespa"],
-            resources: [
-                .process("Resources")
-            ])
+            dependencies: ["Aespa"])
     ]
 )

@@ -21,6 +21,7 @@ class AespaCoreAlbumManager: NSObject {
     private var latestVideoFetchResult: PHFetchResult<PHAsset>?
     private var latestPhotoFetchResult: PHFetchResult<PHAsset>?
     private var isProcessingUserCapture: Bool = false
+    private var hasInitialized: Bool = false
     
     convenience init(
         albumName: String,
@@ -145,12 +146,12 @@ extension AespaCoreAlbumManager: PHPhotoLibraryChangeObserver {
     }
     
     private func ensureLatestFetchResults(for album: PHAssetCollection) {
-        // Flag to indicate we're in initial loading
-        let isInitialLoad = latestVideoFetchResult == nil || latestPhotoFetchResult == nil
+        // Only send initial load events if this is truly the first initialization
+        let shouldSendInitialEvents = !hasInitialized && (latestVideoFetchResult == nil || latestPhotoFetchResult == nil)
         
         if latestVideoFetchResult == nil {
             latestVideoFetchResult = try? AssetLoader(limit: 0, assetType: .video).laodFetchResult(photoLibrary, album)
-            if isInitialLoad,
+            if shouldSendInitialEvents,
                let fetchResult = latestVideoFetchResult,
                fetchResult.count > 0 {
                 let indexSet = IndexSet(integersIn: 0..<fetchResult.count)
@@ -162,7 +163,7 @@ extension AespaCoreAlbumManager: PHPhotoLibraryChangeObserver {
         
         if latestPhotoFetchResult == nil {
             latestPhotoFetchResult = try? AssetLoader(limit: 0, assetType: .image).laodFetchResult(photoLibrary, album)
-            if isInitialLoad,
+            if shouldSendInitialEvents,
                let fetchResult = latestPhotoFetchResult,
                fetchResult.count > 0 {
                 let indexSet = IndexSet(integersIn: 0..<fetchResult.count)
@@ -170,6 +171,11 @@ extension AespaCoreAlbumManager: PHPhotoLibraryChangeObserver {
                 photoAssetEventSubject.send(.added(Array(assets), source: .initialLoad))
             }
             observePhotoLibraryChanges(album: album)
+        }
+        
+        // Mark as initialized after first setup
+        if shouldSendInitialEvents {
+            hasInitialized = true
         }
     }
     
